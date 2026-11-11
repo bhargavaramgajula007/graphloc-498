@@ -1,0 +1,9 @@
+split,repo,tasks,nodes,edges,gold,files,lines,issue_words
+competition_repos,Textualize/rich,74,1071.9,2624.5,1.9,1.3,9.5,240.0
+competition_repos,encode/httpx,77,499.4,1066.1,3.4,1.4,14.0,148.0
+competition_repos,fastapi/fastapi,24,345.9,728.6,1.8,1.2,6.0,266.0
+competition_repos,psf/requests,44,585.2,1247.9,1.4,1.2,5.0,147.0
+heldout_repos,encode/starlette,79,590.8,1066.4,2.7,1.3,10.0,173.0
+heldout_repos,pallets/click,77,585.3,1320.8,2.2,1.2,20.0,155.0
+heldout_repos,pallets/flask,52,426.9,762.8,2.5,1.5,29.5,140.0
+heldout_repos,python-attrs/attrs,71,208.0,423.2,2.9,1.2,22.0,126.0
