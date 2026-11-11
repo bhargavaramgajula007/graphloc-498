@@ -8,3 +8,5 @@ results/rankings_v1.json
 results/smoke/
 __pycache__/
 *.log
+adapters/
+results/lora_v1_buggy/

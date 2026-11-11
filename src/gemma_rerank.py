@@ -15,7 +15,9 @@ from transformers import AutoProcessor, AutoModelForImageTextToText, AutoTokeniz
 MODEL, POOL, COND = sys.argv[1], sys.argv[2], sys.argv[3]
 K = int(sys.argv[4]) if len(sys.argv) > 4 else 20
 tag = MODEL.split("/")[-1]
-OUT = f"results/gemma_{tag}_{POOL.replace(':', '-')}_{COND}_k{K}.jsonl"
+ADAPTER = os.environ.get("ADAPTER")  # optional PEFT LoRA dir
+SPLIT = os.environ.get("SPLIT")      # optional: only evaluate this split
+OUT = f"results/gemma_{tag}_{POOL.replace(':', '-')}_{COND}_k{K}" +       (f"_lora-{os.path.basename(ADAPTER.rstrip('/'))}" if ADAPTER else "") + ".jsonl"
 
 tasks = [json.loads(l) for l in open("data/graphloc.jsonl", encoding="utf-8")]
 rankings = json.load(open(os.environ.get("RANKINGS", "results/rankings.json")))[POOL]
@@ -33,6 +35,9 @@ except Exception as e:
     print("falling back to CausalLM:", e)
     tok = AutoTokenizer.from_pretrained(MODEL)
     model = AutoModelForCausalLM.from_pretrained(MODEL, dtype=torch.bfloat16, device_map="cuda")
+if ADAPTER:
+    from peft import PeftModel
+    model = PeftModel.from_pretrained(model, ADAPTER)
 model.eval()
 
 
@@ -75,7 +80,7 @@ def parse(text, n):
 with open(OUT, "a", encoding="utf-8") as f:
     for t in tasks[: int(os.environ.get("LIMIT", 10**9))]:
         iid = t["instance_id"]
-        if iid in done:
+        if iid in done or (SPLIT and t["split"] != SPLIT):
             continue
         g = json.load(open(f"data/graphs/{iid}.json", encoding="utf-8"))
         nodes = {n["id"]: n for n in g["nodes"]}

@@ -1,38 +1,38 @@
 # Find Flat, Complete on the Graph
 
-### When do code graphs help small coding agents localize bugs? An open 498-task benchmark with competition-schema graphs, and a Gemma 4 study
+### When do code graphs help small coding agents localize bugs? An open 498-task benchmark in the competition's graph schema, and a Gemma 4 study
 
 ## Abstract
 
-The Gemma 4 Developer Agent competition equips agents with code-graph tools (`get_code_neighbors`, `get_code_subgraph`, `search_similar_code`). We ask a narrow, practical question: **for bug localization, when should a small on-device agent use the graph instead of plain retrieval?** We release **GraphLoc-498**, a fully reproducible benchmark of 498 real bug-fix tasks mined from 8 Python repositories (the 4 competition repositories plus 4 held-out ones). Each task pairs a GitHub issue written before the fix with function-level gold labels and a code graph in the competition's NetworkX schema. Across 25 localization strategies under equal *read budgets*, we find a clean division of labour:
+The Gemma 4 Developer Agent harness gives agents code-graph tools (`get_code_neighbors`, `get_code_subgraph`, `search_similar_code`). We ask: **for bug localization, when should a small on-device agent use the graph instead of plain retrieval?** We release **GraphLoc-498**, a fully reproducible benchmark of 498 real bug fixes from 8 Python repositories (the 4 competition repositories plus 4 held out). Each task pairs a pre-fix GitHub issue with function-level gold labels and a code graph in the competition's NetworkX schema. Comparing 25 strategies at equal *read budgets*, we find a clean division of labour:
 
-1. **Graphs are poor finders.** Pure graph expansion from top hits trails simply reading further down a flat ranking at every budget (hit rate 0.84 vs 0.92 at 40 symbols). A dense-led fusion of a code embedder and BM25 finds a gold function in the top 5 for **69.9%** of issues.
-2. **Graphs are good completers.** In 235 multi-location fixes, once one edited function is known, a graph breadth-first search recovers **45% more of the remaining edits** than the flat ranking at a 3-symbol budget (0.360 vs 0.249). Structural edges (`contains`, `inherits`) matter: call edges alone are no better than the flat ranking.
-3. **256-d embeddings suffice if projected.** Naively truncating a 1536-d embedder to 256-d loses 8 points of Acc@5. A per-repository PCA to 256-d loses nothing.
-4. **Gemma-4-E4B, 4-bit, as a listwise reranker** <<GEMMA_ABSTRACT>>
+1. **Graphs are poor finders.** Graph expansion from top hits trails simply reading further down a flat ranking at every budget (0.84 vs 0.92 hit rate at 40 symbols).
+2. **Graphs are good completers.** Once one edit site of a multi-location fix is known, graph search recovers **45% more of the remaining sites** than the flat ranking at a 3-symbol budget. Structural edges matter; call edges alone do not help.
+3. **256-d embeddings suffice if projected.** Truncating a 1536-d embedder to 256 dimensions loses 8 points of Acc@5. PCA to 256 dimensions loses nothing.
+4. **Gemma-4-E4B (4-bit, consumer GPU) is the strongest single step.** As a listwise reranker it lifts top-1 accuracy from 42.0% to 53.4% (+11.4 points, 95% CI [6.8, 16.3]), and its pick is a reliable anchor for graph completion. <<LORA_ABSTRACT>>
 
-We distil these findings into a tool-use policy, *Find Flat, Complete on the Graph* (FFCG), and give concrete prompting guidance for the competition harness.
+We distil these into a tool-use policy, *Find Flat, Complete on the Graph* (FFCG), with concrete guidance for the harness.
 
 ## 1. Introduction
 
-Small open models fail at repository-level software engineering less because they cannot write a patch than because they **cannot find where to write it**. Localization errors dominate agent failure analyses on SWE-bench-style tasks (Xia et al., 2024; Chen et al., 2025). The competition responds by shipping every repository as a call/dependency graph with node embeddings, plus graph tools. Yet graph-guided localization is usually evaluated end-to-end, with a frontier model in the loop. That makes it hard to tell *which* part of the graph helps, *when*, and *at what cost in context tokens*. Context tokens are the scarcest resource for a 4B-parameter model under a 12-hour, single-accelerator budget.
+Small open models struggle with repository-level software engineering less because they cannot write a patch than because they **cannot find where to write it**. Localization is a recognised bottleneck for coding agents (Xia et al., 2024; Chen et al., 2025), and the competition responds by shipping each repository as a call/dependency graph with node embeddings. But graph-guided localization is usually evaluated end-to-end, with a frontier model in the loop. That hides *which* part of the graph helps, *when*, and *at what context cost*, and context is the scarcest resource for a 4B-effective-parameter model on one accelerator.
 
-We isolate localization and measure it under a **read budget**: the number of symbols whose source an agent must place in context. This lets us compare strategies at equal cost, the comparison an agent designer actually faces. We contribute:
+We isolate localization and measure it under a **read budget**: the number of symbols whose source the agent must place in context. This is the comparison an agent designer faces. Contributions:
 
-- **GraphLoc-498 (resource).** 498 issue-linked bug-fix tasks with function-level gold labels, graphs in the exact competition schema, and an open mining pipeline that regenerates everything from `git` and the GitHub API. It contains 219 tasks on the competition's repositories (more than the 129 public training tasks) and 279 tasks on held-out repositories for testing generalization.
-- **An equal-budget methodology** that separates *finding* the first edit location from *completing* a multi-location fix.
-- **Empirical findings** on retrievers, embedding dimensionality, graph propagation, and Gemma 4 reranking, with paired bootstrap confidence intervals.
-- **A policy (FFCG) and harness guidance** that turn these findings into tool calls.
+- **GraphLoc-498 (resource):** 498 issue-linked fixes with function-level gold labels and graphs in the competition schema. 219 tasks come from the competition repositories (more than the 129 public training tasks) and 279 from held-out ones, all regenerated by an open pipeline from `git` and the GitHub API.
+- **An equal-budget methodology** separating *finding* the first edit site from *completing* a multi-site fix.
+- **Findings** on retrievers, embedding dimensionality, graph propagation, and Gemma 4 reranking<<LORA_CONTRIB>>, with paired bootstrap CIs.
+- **A policy (FFCG) and harness guidance.**
 
 ## 2. GraphLoc-498
 
-**Mining.** We replay each repository's first-parent history, keeping squash- or merge-commits whose diff touches 1–3 non-test `.py` files (2–120 changed lines) *and* at least one test file. This is the same "code + test" filter as the competition pipeline. For each pull request we follow GitHub's `closingIssuesReferences` (falling back to `fixes #N` references) and keep the task only if the linked **issue predates the pull request** and has a non-trivial body. The issue, not the PR description, becomes the problem statement, which avoids the well-known leakage in which a PR describes its own fix. Each task stores `base_commit`, `patch`, `test_patch`, and issue text, following the competition's `tasks.jsonl` fields.
+**Mining.** We replay first-parent history and keep commits whose diff touches 1–3 non-test `.py` files (2–120 changed lines) *and* a test file, the same "code + test" filter the competition uses. We follow each pull request's `closingIssuesReferences` (or `fixes #N`) and keep the task only if the linked **issue predates the PR**. The issue text becomes the problem statement, which avoids PR descriptions that leak the fix. Fields follow the competition's `tasks.jsonl` (`base_commit`, `patch`, `test_patch`, …).
 
-**Graphs.** For every `base_commit` we parse all non-test source files with Python's `ast` module. Nodes are modules, classes and functions/methods, with ids that are dotted symbol paths (`requests.models.PreparedRequest.prepare_body`), the same convention as the competition graphs, and each node stores its source `text`. Edges are typed `contains`, `calls`, `imports` and `inherits`. Call edges are resolved through local scopes, imports, package re-exports, `self`/`cls`/`super()` dispatch over the class hierarchy, and a unique-name fallback. Graphs are serialized as NetworkX node-link JSON (`directed`, `multigraph`, `nodes[*].id/name/text`, `edges[*].source/target/type/key`), so they drop into the competition's graph tools.
+**Graphs.** For each `base_commit` we parse all non-test sources with Python's `ast` module. Nodes are modules, classes and functions/methods with dotted ids (`requests.models.PreparedRequest.prepare_body`) and source `text`. Edges are `contains`, `calls`, `imports` and `inherits`. Calls are resolved through local scopes, imports, package re-exports, `self`/`cls`/`super()` dispatch over the class hierarchy, and a unique-name fallback. Graphs are NetworkX node-link JSON in the competition schema, so they drop into its graph tools.
 
-**Gold labels.** Each removed line, and each insertion point, in the gold patch is mapped to the *innermost* function or class enclosing it at `base_commit`. Tasks whose edits touch only module-level code are dropped (19 of 517).
+**Gold labels.** Each edited or inserted line of the gold patch maps to the innermost enclosing function or class at `base_commit`. We drop 19 of 517 tasks that only touch module-level code.
 
-**Statistics.** | Split | Repository | Tasks | Graph nodes | Graph edges | Gold symbols | Gold files | Median Δlines |
+| Split | Repository | Tasks | Graph nodes | Graph edges | Gold symbols | Gold files | Median Δlines |
 |---|---|---|---|---|---|---|---|
 | competition repos | Textualize/rich | 74 | 1072 | 2624 | 1.9 | 1.3 | 10 |
 | competition repos | encode/httpx | 77 | 499 | 1066 | 3.4 | 1.4 | 14 |
@@ -44,23 +44,23 @@ We isolate localization and measure it under a **read budget**: the number of sy
 | heldout repos | python-attrs/attrs | 71 | 208 | 423 | 2.9 | 1.2 | 22 |
 | **all** | 8 repositories | **498** | 563 | 1214 | 2.5 | 1.3 | 14 |
 
-Fixes are local but not trivial. The median patch changes 14 lines, a graph has 563 nodes on average, and **48% of tasks edit more than one symbol**, which motivates the completion analysis. FastAPI yields few tasks (24) because most of its bug reports live in GitHub Discussions rather than Issues, a curation caveat for anyone extending the competition data.
+*Table 1. GraphLoc-498 by repository (means; Δlines is the median).*
+
+**48% of tasks edit more than one symbol**, which motivates the completion analysis. FastAPI yields few tasks because most of its bug reports live in GitHub Discussions, not Issues, a caveat for anyone extending the competition data.
 
 ## 3. Methods
 
-**Candidates.** All function and class nodes of the snapshot (≈ 560 per task). An agent "reads" a node by placing its source in context.
+**Candidates** are all function and class nodes of the snapshot (about 560 per task). Reading a node means placing its source in context.
 
-**Flat retrievers.** *BM25* over identifier-split symbol ids (up-weighted ×3) plus source. *Dense*: Qodo-Embed-1-1.5B (code-specialised, 1536-d) and bge-base-en-v1.5 (general, 768-d), cosine similarity between the issue text and `id + source`. *Mention*: exact matches of identifiers from the issue, which mimics `grep`. *Fusion*: reciprocal-rank fusion (Cormack et al., 2009) of dense and BM25 weighted 2:1 (`fuse2`). We also tried a variant that up-weighted mentions; it hurt.
+**Flat retrievers.** *BM25* over identifier-split ids (weighted ×3) plus source. *Dense*: Qodo-Embed-1-1.5B (code, 1536-d) or bge-base-en-v1.5 (general, 768-d), cosine similarity between the issue and `id + source`. *Mention*: exact identifier matches, which mimics `grep`. *Fusion* (`fuse2`): reciprocal-rank fusion (Cormack et al., 2009) of dense and BM25, weighted 2:1.
 
-**256-d embeddings.** The competition ships 256-d node embeddings. We compare the full embedder, naive truncation to the first 256 dimensions, and a per-snapshot PCA projection to 256 dimensions fitted on node embeddings only (no gold information).
+**256-d embeddings.** The competition ships 256-d node embeddings, so we compare the full embedder, truncation to the first 256 dimensions, and a per-snapshot PCA to 256 dimensions fitted on node embeddings only.
 
-**Graph strategies.** (i) *Personalized PageRank* (PPR; Haveliwala, 2002; cf. HippoRAG, Gutiérrez et al., 2024) seeded with the top-10 flat results and blended with the flat rank. (ii) *1-hop expansion*: top-3 seeds followed by their neighbours, the `get_code_neighbors` analogue. (iii) *Breadth-first search* (BFS) from seeds under a read budget, with neighbours ordered by flat rank. Each runs over three edge sets: `calls`, structural (`contains`+`inherits`), and `all`.
+**Graph strategies.** (i) *Personalized PageRank* (PPR; Haveliwala, 2002; cf. HippoRAG, Gutiérrez et al., 2024) seeded with the top-10 flat results and blended with the flat rank. (ii) *1-hop expansion* of the top-3 seeds, the `get_code_neighbors` analogue. (iii) *Breadth-first search* (BFS) from seeds under a budget, with neighbours ordered by flat rank. Each runs over `calls`, structural (`contains`+`inherits`), or `all` edges.
 
-**Equal-budget protocols.** *Finding*: for budget B, is any gold node among the B nodes read? *Completing*: on multi-location tasks, condition on the first gold node in the flat ranking (the agent has found and confirmed one edit site), and measure the fraction of the *remaining* gold nodes recovered within B further reads.
+**Equal-budget protocols.** *Finding*: is any gold node among the B nodes read? *Completing*: on multi-site tasks, given the first gold node in the flat ranking (one site found and confirmed), what fraction of the *remaining* gold nodes is recovered within B more reads?
 
-**Gemma 4 reranking.** Gemma-4-E4B-it, one of the competition's base models, loaded with 4-bit NF4 weights on a single 16 GB consumer GPU, receives the issue and the top-20 `fuse2` candidates (symbol id plus the first six non-empty source lines) and must output up to five candidate indices, most likely first, with greedy decoding and no reasoning tokens. In the **graph** condition each candidate additionally lists its callees and callers from the graph. The candidate pool is identical across conditions, so any difference comes from the graph context alone.
-
-**Statistics.** Paired bootstrap over tasks (5,000 resamples, 95% CI).
+**Gemma 4 reranking.** Gemma-4-E4B-it (a competition base model), with 4-bit NF4 weights on one 16 GB consumer GPU, sees the issue and the top-20 `fuse2` candidates (id plus the first six source lines). It outputs up to five indices with greedy decoding and no reasoning tokens. The **graph** condition adds each candidate's callers and callees. The pool is identical across conditions. **Statistics:** paired bootstrap over tasks (5,000 resamples, 95% CI).
 
 ## 4. Results
 
@@ -80,7 +80,7 @@ Fixes are local but not trivial. The median patch changes 14 lines, a graph has 
 
 *Table 2. Function-level localization on GraphLoc-498 (Acc@k: any gold symbol in top k; All@10: every gold symbol in top 10).*
 
-A code-specialised embedder beats BM25 by 10.5 points at Acc@5, and the 2:1 fusion adds another 2.8. All methods are markedly harder on the competition repositories than on the held-out ones (Acc@5 0.571 vs 0.799 for `fuse2`). The likely reason is that `rich` and `httpx` have larger, denser graphs and longer issues. This gap should be expected when transferring results from public benchmarks.
+The code embedder beats BM25 by 10.5 points Acc@5, and fusion adds 2.8. Every method is markedly weaker on the competition repositories than on the held-out ones (Acc@5 0.571 vs 0.799), likely because `rich` and `httpx` have larger graphs and longer issues. Results from public benchmarks will overstate performance on the competition repos.
 
 ### 4.2 256 dimensions are enough, if you project
 
@@ -90,48 +90,62 @@ A code-specialised embedder beats BM25 by 10.5 points at Acc@5, and the 2:1 fusi
 | first 256 dims (truncate) | 0.313 | 0.592 | 0.695 | 0.440 |
 | PCA → 256-d | **0.376** | 0.669 | **0.765** | **0.516** |
 
-The same pattern holds for bge-base (truncation 0.584, PCA 0.586, full 0.616 Acc@5). Neither embedder was trained with Matryoshka objectives (Kusupati et al., 2022), so truncation discards information while PCA keeps the useful subspace. **For competitors:** the dimensionality of the provided embeddings is not by itself a bottleneck. How the 256 dimensions were obtained matters more than how many there are.
+bge-base shows the same pattern (Acc@5: truncate 0.584, PCA 0.586, full 0.616). Neither model was trained with Matryoshka objectives (Kusupati et al., 2022), so truncation discards signal while PCA keeps the useful subspace. **For competitors:** 256 dimensions is not by itself a bottleneck. How the dimensions were obtained matters more.
 
 ### 4.3 Graphs are poor finders
 
 ![Find vs complete](fig_find_vs_complete.png)
 
-*Figure 1. (a) Probability that any gold node is among the nodes read, at equal budget. (b) Fraction of the remaining gold nodes recovered after one gold node is known (235 multi-location tasks).*
+*Figure 1. (a) Probability that any gold node is read, at equal budget. (b) Fraction of the remaining gold recovered once one gold node is known (235 multi-site tasks).*
 
-Re-ranking with graph propagation barely moves the needle. PPR over call edges changes Acc@5 from 0.671 to 0.679 and Acc@10 from 0.743 to 0.755. 1-hop expansion of the top-3 seeds *hurts* Acc@5 (0.671 → 0.616–0.629), because neighbours displace good flat candidates. Under an explicit read budget (Fig. 1a), graph BFS from the top three seeds trails the flat ranking at every budget (0.673 vs 0.699 at 5 symbols; 0.835 vs 0.920 at 40). Spending half the budget on 1-hop neighbours is at best neutral (0.876 vs 0.867 at 20).
+Graph re-ranking barely moves the needle: PPR over calls takes Acc@5 from 0.671 to 0.679. 1-hop expansion *hurts* (Acc@5 0.616–0.629), because neighbours displace good flat candidates. At equal budget (Fig. 1a), BFS from the top-3 seeds trails the flat ranking everywhere (0.673 vs 0.699 at 5 reads; 0.835 vs 0.920 at 40). Spending half the budget on neighbours is at best neutral.
 
-Why? Hop distances explain it. When the top-1 flat result is wrong (58% of tasks), the nearest gold node is often far away: **36% of tasks have no gold node within 3 call-edges** of the top-1 hit, and 10% even with all edge types. A wrong seed sends graph exploration into the wrong neighbourhood, while the flat ranking keeps sampling independent hypotheses.
+Hop distances explain why. The top-1 result is wrong in 58% of tasks, and then gold is often far away: **36% of tasks have no gold within 3 call edges** of the top-1 hit (10% with all edge types). A wrong seed sends exploration into the wrong neighbourhood, while the flat ranking keeps sampling independent hypotheses.
 
 ### 4.4 Graphs are good completers
 
-The picture reverses once one edit site is known (Fig. 1b). Co-edited symbols cluster: in **69% of multi-location fixes** at least one pair of gold nodes is directly connected (any edge type; 49% via calls alone). BFS from the known site over *all* edges recovers 0.360 of the remaining gold at 3 reads versus 0.249 for the flat ranking (+45% relative), and 0.483 vs 0.357 at 5. Alternating graph and flat picks is best at larger budgets: 0.633 vs 0.510 at 10, 0.755 vs 0.636 at 20. **Edge type matters**: call edges alone tie the flat ranking at 5 reads (0.357 vs 0.357) and fall behind from 10 onward (0.470 vs 0.510; 0.566 vs 0.636 at 20). Sibling methods, overrides and subclass hooks connect through `contains`/`inherits`, not `calls`. Agents that call `get_code_neighbors(node, edge_type="calls")` leave most of the graph's value unused.
+The picture reverses once one site is known (Fig. 1b). Co-edited symbols cluster: in **69% of multi-site fixes** at least two gold nodes are directly connected (49% via calls alone). BFS over *all* edges from the known site recovers 0.360 of the remaining gold within 3 reads, versus 0.249 for the flat ranking (+45% relative). Alternating graph and flat picks is best at larger budgets (0.633 vs 0.510 at 10; 0.755 vs 0.636 at 20). **Edge type matters:** calls alone tie flat at 5 reads and fall behind from 10 onward (0.470 vs 0.510). Sibling methods, overrides and subclass hooks connect through `contains`/`inherits`, so `get_code_neighbors(node, edge_type="calls")` leaves most of the graph's value unused.
 
-### 4.5 An end-to-end policy: Find Flat, Complete on the Graph
+### 4.5 End-to-end policy: Find Flat, Complete on the Graph
 
-Without oracle knowledge of which hit is correct, FFCG reads the top-s flat results and then alternates graph BFS from those anchors (all edges) with further flat results. With s = 3 it improves recall@10 by **+2.6 points** [0.8, 4.4], recall@20 by +2.6 [1.2, 4.2] and all-gold@20 by +2.4 [0.2, 4.6], with no significant change in Acc@5 or Acc@10. The gain over the flat ranking is real but modest *because the anchor is unverified*. The oracle analysis in §4.4 shows the headroom (up to +12 points) that a reliable confirmation signal would unlock, such as a failing reproduction test or the LLM's own judgement.
+Without knowing which hit is correct, FFCG reads the top-s flat results, then alternates graph BFS from those anchors (all edges) with further flat results. With s = 3 it improves recall@10 by **+2.6 points** [0.8, 4.4] and all-gold@20 by +2.4 [0.2, 4.6], with no change in Acc@5. The gain is modest *because the anchor is unverified*. §4.4 shows the headroom (up to +12 points) that a reliable confirmation signal would unlock.
 
 ### 4.6 Gemma 4 as reranker and gate
 
-<<GEMMA_SECTION>>
+| Gemma-4-E4B-it (4-bit), top-20 `fuse2` pool | Acc@1 | Acc@5 | Δ Acc@1 vs retrieval [95% CI] | Prompt tokens |
+|---|---|---|---|---|
+| Retrieval only (`fuse2`) | 0.420 | 0.699 | – | – |
+| Gemma rerank, plain candidates | 0.516 | 0.749 | +9.6 [5.2, 14.1] | 2,013 |
+| Gemma rerank, + call-graph context | **0.534** | **0.757** | +11.4 [6.8, 16.3] | 2,461 |
+<<LORA_ROWS>>
+
+*Table 3. Listwise reranking with Gemma 4. Gold is in the pool for 86.7% of tasks, the ceiling for Acc@k ≤ 20.*
+
+**Reranking.** Without any reasoning tokens, Gemma ranks the gold symbol first in 59.5% of tasks where it is in the pool. The gain holds on both splits: competition repositories 0.329 → 0.425, held-out 0.491 → 0.588 (plain prompt).
+
+**Graph context in the prompt** adds 22% more tokens for a non-significant +1.8 points [−1.0, 4.6]. Consistent with §4.3, knowing what a candidate connects to does little to decide whether it is the bug.
+
+**Gemma as the gate.** Using Gemma's top pick as the single FFCG anchor improves all-gold@20 by **+4.6** [2.2, 7.0] over Gemma's own ranking. That is more than twice the gain from an unverified retrieval anchor. The full stack (retrieval → Gemma rerank → graph completion) beats retrieval alone by +11.4 Acc@1, +6.8 Acc@5 and +4.0 all-gold@20, all significant.
+
+<<LORA_SECTION>>
 
 ## 5. Guidance for agents in the competition harness
 
-1. **Find with `search_similar_code` plus lexical search, not with the graph.** Issue the issue text (or a condensed query) to `search_similar_code`, combine it with `grep`/`rg` on identifiers (BM25-like), and read the top 5–10 symbols. Do not spend early turns on `get_code_neighbors`.
-2. **Confirm before expanding.** Once a candidate is confirmed (a reproduction test fails inside it, or the model is confident after reading it), switch to `get_code_neighbors(node)` **without** an `edge_type` filter, or `get_code_subgraph` over the confirmed node and its siblings, to find the remaining edit sites.
-3. **Prefer structure over calls** when choosing neighbours: siblings in the same class, overridden methods in subclasses, and the containing class's `__init__`.
-4. **Keep the reranking step cheap.** A 4-bit E4B listwise rerank of 20 candidates costs about 2k prompt tokens and about 5 s on a consumer GPU. <<GEMMA_GUIDANCE>>
+1. **Find flat.** Query `search_similar_code` with the issue, combine it with `grep` on identifiers, and read the top 5–10 symbols. Don't spend early turns on `get_code_neighbors`.
+2. **Rerank cheaply.** A 4-bit E4B listwise rerank of 20 candidates costs about 2k tokens and 5 s, and it was the most effective single step we measured.
+3. **Confirm, then complete on the graph.** Once a site is confirmed (a failing reproduction test, or the model's pick after reading it), call `get_code_neighbors(node)` **without** an `edge_type` filter, or `get_code_subgraph`, to find the remaining sites. Prefer siblings, overrides and the containing class over call edges.
 
 ## 6. Related work
 
-**Benchmarks and agents.** SWE-bench (Jimenez et al., 2024) established issue-to-patch evaluation. SWE-agent (Yang et al., 2024) and AutoCodeRover (Zhang et al., 2024) showed that tool interfaces drive agent success. Agentless (Xia et al., 2024) made localization an explicit hierarchical stage (file → class/function → line). **Graph-based localization.** RepoGraph (Ouyang et al., 2025) and CodexGraph (Liu et al., 2024) expose repository graphs to LLMs. LocAgent (Chen et al., 2025) builds heterogeneous code graphs for multi-hop agent search. OrcaLoca (Yu et al., 2025) adds priority-based scheduling and distance-aware context pruning. These works report end-to-end gains with large models. We complement them with an **equal-budget decomposition** showing *where* the graph helps (completion) and where it does not (first-hit finding), for a *small* model. **Graph retrieval.** Personalized PageRank for retrieval-augmented generation (HippoRAG; Gutiérrez et al., 2024) inspired our propagation baseline. **Embeddings.** Matryoshka representation learning (Kusupati et al., 2022) explains why naive truncation of non-MRL embedders is lossy.
+SWE-bench (Jimenez et al., 2024) established issue-to-patch evaluation. SWE-agent (Yang et al., 2024) and AutoCodeRover (Zhang et al., 2024) showed that tool interfaces drive agent success, and Agentless (Xia et al., 2024) made hierarchical localization an explicit stage. RepoGraph (Ouyang et al., 2025) and CodexGraph (Liu et al., 2024) expose repository graphs to LLMs. LocAgent (Chen et al., 2025) runs multi-hop agent search over heterogeneous code graphs, and OrcaLoca (Yu et al., 2025) adds priority scheduling and distance-aware pruning. These report end-to-end gains with large models. We add an **equal-budget decomposition** showing *where* graphs help (completion) and where they do not (finding), for a *small* model. Our PPR baseline follows HippoRAG (Gutiérrez et al., 2024). Matryoshka learning (Kusupati et al., 2022) explains why truncating non-MRL embeddings is lossy.
 
 ## 7. Limitations
 
-Localization accuracy is a proxy: we do not run patches through tests. Gold labels reflect *one* valid fix; alternative fixes may edit other symbols. Our call graph is static and heuristic: dynamic dispatch through untyped attributes is only partly resolved, which likely understates the value of `calls` edges. Our graphs and embeddings are re-created rather than the hidden competition artefacts, although the schema matches. All repositories are mature Python libraries; results may differ for application code. Gemma results use 4-bit bitsandbytes quantization rather than the competition's QAT w4a16 checkpoints.
+Localization is a proxy: we do not run patches through tests, and gold labels reflect *one* valid fix. Our static call graph only partly resolves dynamic dispatch, which may understate `calls` edges. Graphs and embeddings are re-created rather than the hidden competition artefacts, though the schema matches. All repositories are mature Python libraries. We use 4-bit NF4 rather than the competition's QAT w4a16 checkpoints, and evaluate only E4B (disk limits prevented an E2B run).
 
 ## Reproducibility
 
-Everything regenerates from public sources: `mine.py` (git + GitHub GraphQL) → `build_all.py` (graphs, gold labels) → `localize.py` (all retrievers, rankings) → `analysis.py`, `completion.py`, `policy.py` (equal-budget, completion and bootstrap analyses) → `gemma_rerank.py`. Total compute was one RTX 5070 Ti (16 GB) for about 3 hours. Code and the GraphLoc-498 release are linked in Project Links.
+Everything regenerates from public sources with one pipeline: `mine.py` → `build_all.py` → `localize.py` → `analysis.py`/`completion.py`/`policy.py` → `gemma_rerank.py`<<LORA_REPRO>>. Compute: one RTX 5070 Ti (16 GB). Code and data: https://github.com/bhargavaramgajula007/graphloc-498
 
 ## References
 
@@ -143,9 +157,8 @@ Everything regenerates from public sources: `mine.py` (git + GitHub GraphQL) →
 - Kusupati, A., et al. (2022). Matryoshka Representation Learning. *NeurIPS*.
 - Liu, X., et al. (2024). CodexGraph: Bridging Large Language Models and Code Repositories via Code Graph Databases. *arXiv:2408.03910*.
 - Ouyang, S., et al. (2025). RepoGraph: Enhancing AI Software Engineering with Repository-level Code Graph. *ICLR*.
-- Robertson, S., Zaragoza, H. (2009). The Probabilistic Relevance Framework: BM25 and Beyond. *Foundations and Trends in IR*.
 - Xia, C. S., et al. (2024). Agentless: Demystifying LLM-based Software Engineering Agents. *arXiv:2407.01489*.
 - Yang, J., et al. (2024). SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering. *NeurIPS*.
 - Yu, Z., et al. (2025). OrcaLoca: An LLM Agent Framework for Software Issue Localization. *ICML*.
 - Zhang, Y., et al. (2024). AutoCodeRover: Autonomous Program Improvement. *ISSTA*.
-- Google DeepMind (2026). Gemma 4 model card; Qodo (2025). Qodo-Embed-1 model card; Xiao, S., et al. (2023). C-Pack / bge embeddings.
+- Model cards: Gemma 4 (Google DeepMind, 2026); Qodo-Embed-1 (Qodo, 2025); bge-base-en-v1.5 (BAAI, 2023).
