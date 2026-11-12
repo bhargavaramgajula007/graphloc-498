@@ -14,7 +14,7 @@ from peft import LoraConfig, get_peft_model
 
 MODEL, TRAIN_SPLIT, COND, OUT = sys.argv[1:5]
 N_PERM = int(sys.argv[5]) if len(sys.argv) > 5 else 4
-K, LR, ACC, MAXLEN = 20, 1e-4, 8, int(os.environ.get("MAXLEN", 2560))
+K, LR, ACC, MAXLEN = 20, float(os.environ.get("LR", 5e-5)), 8, int(os.environ.get("MAXLEN", 2560))
 random.seed(0); torch.manual_seed(0)
 
 
@@ -65,8 +65,9 @@ for t in tasks:
         pool[idx] = n
     for p in range(N_PERM):
         cands = list(pool)
-        # keep retrieval order (a genuine prior) only when the pool was not modified
-        if p > 0 or missing:
+        # v3: perm 0 keeps retrieval order (a genuine prior; injected gold sits at a random slot),
+        # later perms are shuffled for robustness
+        if p > 0:
             random.shuffle(cands)
         ans = [cands.index(n) for n in gold_in_order if n in cands][:5]
         prompt = build_prompt(t, cands, nodes, g["edges"])

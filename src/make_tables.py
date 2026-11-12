@@ -10,7 +10,7 @@ st = pd.read_csv("results/dataset_stats.csv")
 t1 = ["| Split | Repository | Tasks | Graph nodes | Graph edges | Gold symbols | Gold files | Median Δlines |",
       "|---|---|---|---|---|---|---|---|"]
 for _, r in st.iterrows():
-    t1.append(f"| {r.split.replace('_', ' ')} | {r.repo} | {r.tasks} | {r.nodes:.0f} | {r.edges:.0f} | {r.gold:.1f} | {r.files:.1f} | {r.lines:.0f} |")
+    t1.append(f"| {r.split.replace('_', ' ').replace('heldout', 'held-out')} | {r.repo} | {r.tasks} | {r.nodes:.0f} | {r.edges:.0f} | {r.gold:.1f} | {r.files:.1f} | {r.lines:.0f} |")
 tasks = [json.loads(l) for l in open("data/graphloc.jsonl", encoding="utf-8")]
 t1.append(f"| **all** | 8 repositories | **{len(tasks)}** | {np.mean([t['n_graph_nodes'] for t in tasks]):.0f} | "
           f"{np.mean([t['n_graph_edges'] for t in tasks]):.0f} | {np.mean([len(t['gold_nodes']) for t in tasks]):.1f} | "

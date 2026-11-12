@@ -11,7 +11,17 @@ Code and data for the Kaggle *Gemma 4 Developer Agent Paper Track* submission
 | `data/graphs/<instance_id>.json` | NetworkX node-link code graph at `base_commit`, using the competition schema (`nodes[*].id/name/text`, `edges[*].source/target/type/key`), plus `kind/file/start/end` on nodes |
 | `results/` | rankings, per-task metrics, equal-budget, completion, policy and Gemma outputs |
 | `src/` | full pipeline (below) |
-| `paper/` | writeup and figure |
+| `paper/` | `writeup_final.md` (the submitted paper), `writeup.md` (template), figure |
+
+## Download
+
+Graphs (`data/graphs/`, 60 MB compressed) and all rankings (`results/rankings.json`) are attached to the
+[v1.0 release](https://github.com/bhargavaramgajula007/graphloc-498/releases/tag/v1.0):
+
+```bash
+gh release download v1.0 -R bhargavaramgajula007/graphloc-498
+tar -xzf graphloc498_graphs.tar.gz -C data && gunzip -c rankings.json.gz > results/rankings.json
+```
 
 ## Reproduce
 
@@ -31,6 +41,9 @@ python src/policy.py        # end-to-end FFCG policy + paired bootstrap
 python src/gemma_rerank.py google/gemma-4-E4B-it fuse2 plain 20
 python src/gemma_rerank.py google/gemma-4-E4B-it fuse2 graph 20
 python src/gemma_policy.py plain
+# 7. cross-repo QLoRA (negative result, §4.7): results in results/lora_v1_buggy, results/lora_v2_shuffled
+python src/lora_train.py google/gemma-4-E4B-it competition_repos plain adapters/loc_comp2held 3
+ADAPTER=adapters/loc_comp2held SPLIT=heldout_repos python src/gemma_rerank.py google/gemma-4-E4B-it fuse2 plain 20
 ```
 
 ## Licenses
