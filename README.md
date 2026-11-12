@@ -42,7 +42,8 @@ python src/gemma_rerank.py google/gemma-4-E4B-it fuse2 plain 20
 python src/gemma_rerank.py google/gemma-4-E4B-it fuse2 graph 20
 python src/gemma_policy.py plain
 # 7. cross-repo QLoRA (negative result, §4.7): results in results/lora_v1_buggy, results/lora_v2_shuffled
-#    HEAD's lora_train.py is the order-preserving v3 design (designed, not run). The v2 run used the
+#    HEAD's lora_train.py is v3 (one retrieval-ordered + one shuffled copy, LR 5e-5; `bash run_v3.sh`),
+#    result in results/gemma_*_lora-loc_comp2held.jsonl (fold A). The v2 run used the
 #    script at commit cdfa5fe (LR 1e-4, 3 orders); v1 differs from v2 only in inserting missed gold at the
 #    lowest-ranked slot instead of a random slot.
 python src/lora_train.py google/gemma-4-E4B-it competition_repos plain adapters/loc_comp2held 3

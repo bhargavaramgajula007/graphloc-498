@@ -4,12 +4,12 @@
 
 ## Abstract
 
-The Gemma 4 Developer Agent harness gives agents code-graph tools (`get_code_neighbors`, `get_code_subgraph`, `search_similar_code`). We ask: **for bug localization, when should a small on-device agent use the graph instead of plain retrieval?** We release **GraphLoc-498**, a fully reproducible benchmark of 498 real bug fixes from 8 Python repositories (the 4 competition repositories plus 4 held out). Each task pairs a pre-fix GitHub issue with function-level gold labels and a code graph in the competition's NetworkX schema. Comparing 25 strategies at equal *read budgets*, we find a clean division of labour:
+The Gemma 4 Developer Agent harness gives agents code-graph tools (`get_code_neighbors`, `get_code_subgraph`, `search_similar_code`). We ask: **for bug localization, when should a small on-device agent use the graph instead of plain retrieval?** We release **GraphLoc-498**, a reproducible benchmark of 498 real bug fixes from 8 Python repositories (the 4 competition repositories plus 4 held out). Each task pairs a pre-fix GitHub issue with function-level gold labels and a code graph in the competition's NetworkX schema. Comparing 25 strategies at equal *read budgets*, we find a clean division of labour:
 
 1. **Graphs are poor finders.** Graph expansion from top hits trails simply reading further down a flat ranking at every budget (0.84 vs 0.92 hit rate at 40 symbols).
 2. **Graphs are good completers.** Once one edit site of a multi-location fix is known, graph search recovers **45% more of the remaining sites** than the flat ranking at a 3-symbol budget. Structural edges matter; call edges alone do not help.
 3. **256-d embeddings suffice if projected.** Truncating a 1536-d embedder to 256 dimensions loses 8 points of Acc@5. PCA to 256 dimensions loses nothing.
-4. **Gemma-4-E4B (4-bit, consumer GPU) is the strongest single step.** As a listwise reranker it lifts top-1 accuracy from 42.0% to 53.4% (+11.4 points, 95% CI [6.8, 16.3]), and its pick is a reliable anchor for graph completion. A cautionary result: naive cross-repository QLoRA fine-tuning on 219 tasks *hurts* (−9 to −11 points top-1), because the adapter learns the label-position distribution of its training lists.
+4. **Gemma-4-E4B (4-bit, consumer GPU) is the strongest single step.** As a listwise reranker it lifts top-1 accuracy from 42.0% to 53.4% (+11.4 points, 95% CI [6.8, 16.3]), and its pick is a reliable anchor for graph completion. A cautionary result: naive cross-repository QLoRA fine-tuning on 219 tasks *hurts* (−7 to −11 points top-1 across three designs), because the adapter learns the label-position distribution of its training lists.
 
 We distil these into a policy, *Find Flat, Complete on the Graph* (FFCG).
 
@@ -26,7 +26,7 @@ We isolate localization and measure it under a **read budget**: the number of sy
 
 ## 2. GraphLoc-498
 
-**Mining.** We replay first-parent history and keep commits whose diff touches 1–3 non-test `.py` files (2–120 changed lines) *and* a test file, the same "code + test" filter the competition uses. We follow each pull request's `closingIssuesReferences` (or `fixes #N`) and keep the task only if the linked **issue predates the PR**. The issue text becomes the problem statement, which avoids PR descriptions that leak the fix. Fields follow the competition's `tasks.jsonl` (`base_commit`, `patch`, `test_patch`, …).
+**Mining.** We replay first-parent history and keep commits whose diff touches 1–3 non-test `.py` files (2–120 changed lines) *and* a test file, the same "code + test" filter the competition uses. We follow each pull request's `closingIssuesReferences` (or `fixes #N`) and keep the task only if the linked **issue predates the PR**. The issue text becomes the problem statement, which avoids PR descriptions that leak the fix. Fields follow the competition's `tasks.jsonl`.
 
 **Graphs.** For each `base_commit` we parse all non-test sources with Python's `ast` module. Nodes are modules, classes and functions/methods with dotted ids (`requests.models.PreparedRequest.prepare_body`) and source `text`. Edges are `contains`, `calls`, `imports` and `inherits`. Calls are resolved through local scopes, imports, package re-exports, `self`/`cls`/`super()` dispatch over the class hierarchy, and a unique-name fallback. Graphs are NetworkX node-link JSON in the competition schema, so they drop into its graph tools.
 
@@ -46,7 +46,7 @@ We isolate localization and measure it under a **read budget**: the number of sy
 
 *Table 1. GraphLoc-498 by repository (means; Δlines is the median).*
 
-**48% of tasks edit more than one symbol**, which motivates the completion analysis. FastAPI yields few tasks because most of its bug reports live in GitHub Discussions, not Issues, a caveat for anyone extending the competition data.
+**48% of tasks edit more than one symbol**, which motivates the completion analysis. FastAPI yields few tasks: most of its bug reports live in GitHub Discussions, not Issues.
 
 ## 3. Methods
 
@@ -90,7 +90,7 @@ The code embedder beats BM25 by 10.5 points Acc@5, and fusion adds 2.8. Every me
 | first 256 dims (truncate) | 0.313 | 0.592 | 0.695 | 0.440 |
 | PCA → 256-d | **0.376** | 0.669 | **0.765** | **0.516** |
 
-bge-base shows the same pattern (Acc@5: truncate 0.584, PCA 0.586, full 0.616). Neither model was trained with Matryoshka objectives (Kusupati et al., 2022), so truncation discards signal while PCA keeps the useful subspace. **For competitors:** 256 dimensions is not by itself a bottleneck. How the dimensions were obtained matters more.
+bge-base shows the same pattern (Acc@5: truncate 0.584, PCA 0.586, full 0.616). Neither model was trained with Matryoshka objectives (Kusupati et al., 2022), so truncation discards signal while PCA keeps the useful subspace. **For competitors:** how the 256 dimensions are obtained matters more than their number.
 
 ### 4.3 Graphs are poor finders
 
@@ -98,7 +98,7 @@ bge-base shows the same pattern (Acc@5: truncate 0.584, PCA 0.586, full 0.616). 
 
 *Figure 1. (a) Probability that any gold node is read, at equal budget. (b) Fraction of the remaining gold recovered once one gold node is known (235 multi-site tasks).*
 
-Graph re-ranking barely moves the needle: PPR over calls takes Acc@5 from 0.671 to 0.679. 1-hop expansion *hurts* (Acc@5 0.616–0.629), because neighbours displace good flat candidates. At equal budget (Fig. 1a), BFS from the top-3 seeds trails the flat ranking everywhere (0.673 vs 0.699 at 5 reads; 0.835 vs 0.920 at 40). Spending half the budget on neighbours is at best neutral.
+Graph re-ranking barely moves the needle: PPR over calls takes Acc@5 from 0.671 to 0.679. 1-hop expansion *hurts* (Acc@5 0.616–0.629), because neighbours displace good flat candidates. At equal budget (Fig. 1a), BFS from the top-3 seeds trails the flat ranking everywhere (0.673 vs 0.699 at 5 reads; 0.835 vs 0.920 at 40).
 
 Hop distances explain why. The top-1 result is wrong in 58% of tasks, and gold is then often far away: **36% of tasks have no gold within 3 call edges** of the top-1 hit (10% with all edge types). A wrong seed sends exploration into the wrong neighbourhood; the flat ranking keeps sampling independent hypotheses.
 
@@ -128,25 +128,26 @@ Without knowing which hit is correct, FFCG reads the top-s flat results, then al
 
 ### 4.7 LoRA fine-tuning: a diagnosed negative result
 
-We QLoRA-tuned E4B (r = 16 on the language model's attention and MLP projections, 35M trainable parameters, loss on answer tokens only) on the 219 competition-repo tasks and evaluated it on the 279 held-out-repo tasks with the identical prompt. When retrieval missed a gold symbol, we inserted it into the training list, and each task appeared in three candidate orders.
+We QLoRA-tuned E4B (r = 16 on attention and MLP projections, 35M parameters, answer-token loss) on the 219 competition-repo tasks and evaluated it on the 279 held-out-repo tasks with the identical prompt. When retrieval missed a gold symbol, we inserted it into the training list; each task appeared in two or three candidate orders.
 
 | Held-out repos | Acc@1 (LoRA vs zero-shot) | Acc@5 | Δ Acc@1 [95% CI] | First pick at index ≥ 10 |
 |---|---|---|---|---|
 | v1: missed gold inserted at list tail | 0.495 vs 0.588 | 0.814 vs 0.810 | −9.3 [−15.1, −3.6] | 37% vs 6% |
 | v2: random insertion, mostly shuffled lists | 0.493 vs 0.604 (n = 227) | 0.811 vs 0.815 | −11.0 [−17.2, −4.8] | 40% vs 5% |
+| v3: one copy in retrieval order, one shuffled (LR 5e-5) | 0.520 vs 0.588 | 0.803 vs 0.810 | −6.8 [−11.5, −2.2] | 34% vs 6% |
 
-Both adapters erase the zero-shot gain at Acc@1 and leave Acc@5 unchanged. The diagnostic column shows why. v1 learned a shortcut: inserted gold always sat at the end of the list. v2 removed the shortcut, but shuffling taught a *uniform* position prior, discarding the retrieval-order prior that zero-shot Gemma exploits (on held-out repos its first pick is the retrieval top-1 43% of the time). **Lesson for competitors:** with a few hundred tasks, listwise SFT mostly learns the label-position distribution of its training lists. Training lists must match the test-time order (retrieval-ordered, with gold where retrieval naturally put it), or rank must be given as an explicit feature. An order-preserving variant was designed but could not be run within our compute window.
+All adapters cut Acc@1 and leave Acc@5 unchanged; the last column shows why. v1 learned a shortcut: inserted gold always sat at the end of the list. v2 removed the shortcut, but shuffling taught a *uniform* position prior, discarding the retrieval-order prior that zero-shot Gemma exploits (on held-out repos its first pick is the retrieval top-1 43% of the time, v3's only 32%). v3 restored retrieval order in half the copies and shrank the loss, but injected gold at random slots still pulls picks deep into the list. **Lesson for competitors:** with a few hundred tasks, listwise SFT mostly learns the label-position distribution of its training lists. Train only on test-time-like lists (retrieval order, no injected gold), or give rank as an explicit feature.
 
 ## 5. Guidance for agents in the competition harness
 
 1. **Find flat.** Query `search_similar_code` with the issue, combine it with `grep` on identifiers, and read the top 5–10 symbols. Don't spend early turns on `get_code_neighbors`.
 2. **Rerank cheaply.** A 4-bit E4B listwise rerank of 20 candidates costs about 2k tokens and 5 s, and it was the most effective single step we measured.
-3. **Fine-tune with care.** If you train a reranker LoRA, keep candidate lists in retrieval order. Shuffled or gold-injected lists teach position priors that cost about 10 points top-1 (§4.7).
+3. **Fine-tune with care.** If you train a reranker LoRA, train on lists exactly as retrieval returns them. Shuffled or gold-injected lists teach position priors that cost 7–11 points top-1 (§4.7).
 4. **Confirm, then complete on the graph.** Once a site is confirmed (a failing reproduction test, or the model's pick after reading it), call `get_code_neighbors(node)` **without** an `edge_type` filter, or `get_code_subgraph`, to find the remaining sites. Prefer siblings, overrides and the containing class over call edges.
 
 ## 6. Related work
 
-SWE-bench (Jimenez et al., 2024) established issue-to-patch evaluation. SWE-agent (Yang et al., 2024) and AutoCodeRover (Zhang et al., 2024) showed that tool interfaces drive agent success, and Agentless (Xia et al., 2024) made hierarchical localization an explicit stage. RepoGraph (Ouyang et al., 2025) and CodexGraph (Liu et al., 2024) expose repository graphs to LLMs. LocAgent (Chen et al., 2025) runs multi-hop agent search over heterogeneous code graphs, and OrcaLoca (Yu et al., 2025) adds priority scheduling and distance-aware pruning. We add an **equal-budget decomposition** showing *where* graphs help a *small* model (completion) and where they do not (finding). Our PPR baseline follows HippoRAG (Gutiérrez et al., 2024). Matryoshka learning (Kusupati et al., 2022) explains why truncating non-MRL embeddings is lossy.
+SWE-bench (Jimenez et al., 2024) established issue-to-patch evaluation. SWE-agent (Yang et al., 2024) and AutoCodeRover (Zhang et al., 2024) showed that tool interfaces drive agent success, and Agentless (Xia et al., 2024) made hierarchical localization an explicit stage. RepoGraph (Ouyang et al., 2025) and CodexGraph (Liu et al., 2024) expose repository graphs to LLMs. LocAgent (Chen et al., 2025) runs multi-hop agent search over heterogeneous code graphs, and OrcaLoca (Yu et al., 2025) adds priority scheduling and distance-aware pruning. We add an **equal-budget decomposition** showing *where* graphs help a *small* model (completion) and where they do not (finding).
 
 ## 7. Limitations
 
