@@ -118,10 +118,10 @@ All adapters cut Acc@1 and leave Acc@5 unchanged; the last column shows why. v1 
 
 ## 5. Guidance for agents in the competition harness
 
-1. **Find flat.** Query `search_similar_code` with the issue, combine it with `grep` on identifiers, and read the top 5–10 symbols. Don't spend early turns on `get_code_neighbors`.
+1. **Find flat.** `grep` issue identifiers, rank symbols lexically, and read the top 5–10. `search_similar_code` takes a symbol, so seed it from a grep hit. Don't spend early turns on `get_code_neighbors`.
 2. **Rerank cheaply.** A 4-bit E4B listwise rerank of 20 candidates costs about 2k tokens and 5 s, and it was the most effective single step we measured.
 3. **Fine-tune with care.** If you train a reranker LoRA, train on lists exactly as retrieval returns them. Shuffled or gold-injected lists teach position priors that cost 7–11 points top-1 (§4.7).
-4. **Confirm, then complete on the graph.** Once a site is confirmed (a failing reproduction test, or the model's pick after reading it), call `get_code_neighbors(node)` **without** an `edge_type` filter, or `get_code_subgraph`, to find the remaining sites. Prefer siblings, overrides and the containing class over call edges.
+4. **Confirm, then complete on the graph.** Once a site is confirmed (a failing reproduction test, or the model's pick after reading it), read its siblings and containing class, then call neighbours. Released graphs reportedly hold only `calls` edges, our weakest completer; recover `contains` from the dotted ids (shared `module.Class.` prefix).
 
 ## 6. Related work
 
@@ -129,7 +129,7 @@ SWE-bench (Jimenez et al., 2024) established issue-to-patch evaluation. SWE-agen
 
 ## 7. Limitations
 
-Localization is a proxy: we do not run patches through tests, and gold labels reflect *one* valid fix. Our static call graph only partly resolves dynamic dispatch, which may understate `calls` edges. Graphs and embeddings are re-created rather than the hidden competition artefacts, though the schema matches. We use 4-bit NF4 rather than the competition's QAT w4a16 checkpoints, and evaluate only E4B (disk limits prevented an E2B run).
+Localization is a proxy: we do not run patches through tests, and gold labels reflect *one* valid fix. Our static call graph only partly resolves dynamic dispatch, which may understate `calls` edges. Graphs and embeddings are re-created, not the competition artefacts; ours add module nodes and structural edges. We use 4-bit NF4 rather than the competition's QAT w4a16 checkpoints, and evaluate only E4B (disk limits prevented an E2B run).
 
 ## Reproducibility
 
